@@ -1,0 +1,249 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+
+  <title><![CDATA[Category: Fluentd | A Life on Rails]]></title>
+  <link href="http://jwako.github.io/blog/categories/fluentd/atom.xml" rel="self"/>
+  <link href="http://jwako.github.io/"/>
+  <updated>2014-08-22T18:29:15+09:00</updated>
+  <id>http://jwako.github.io/</id>
+  <author>
+    <name><![CDATA[jwako]]></name>
+    
+  </author>
+  <generator uri="http://octopress.org/">Octopress</generator>
+
+  
+  <entry>
+    <title type="html"><![CDATA[Fluentdで、RailsのログをS3に保存する方法]]></title>
+    <link href="http://jwako.github.io/blog/2014/08/22/fluentd/"/>
+    <updated>2014-08-22T18:24:37+09:00</updated>
+    <id>http://jwako.github.io/blog/2014/08/22/fluentd</id>
+    <content type="html"><![CDATA[<h2>What is fluentd?</h2>
+
+<ul>
+<li>ログ収集をプログラマブルに実施し、状況に応じた柔軟な対応が実現できるソフトウェア</li>
+<li>ログの管理を「インプット」「バッファ」「アウトプット」という3つの層に分けて管理</li>
+<li>fluentdは内部で各ログデータに対して「タグ」を付与し、管理</li>
+<li>fluentdではログの内容（レコード）がJSON形式になっている
+
+<ul>
+<li>そのため、アプリケーション側でのパースが容易であるというメリットがある</li>
+</ul>
+</li>
+</ul>
+
+
+<h2>Why Fluentd? : ログ管理への要求</h2>
+
+<ul>
+<li>ログの多様化・肥大化への対応</li>
+<li>ログ情報を基にした分析の必要性</li>
+</ul>
+
+
+<h2>fluentdの設定方法</h2>
+
+<h3>インストール方法</h3>
+
+<p>様々なインストール方法がある</p>
+
+<ul>
+<li>RPMパッケージからFluentdをインストールする (Redhat Linux)</li>
+<li>DEBパッケージからFluentdをインストールする (Debian / Ubuntu Linux)</li>
+<li>DMGパッケージからFluentdをインストールする (Mac OS X)</li>
+<li>Ruby GemからFluentdをインストールする</li>
+<li>ChefでFluentdをインストールする</li>
+<li>ソースコードからFluentdをインストールする</li>
+</ul>
+
+
+<p><a href="http://docs.fluentd.org/ja/categories/installation">インストール | Fluentd</a></p>
+
+<h4>Gemからインストールする場合</h4>
+
+<ul>
+<li>gemの場合は、/etc/init.d/ にスクリプトは作られません</li>
+<li>daemontools, runit, supervisord, またはupstartのようなプロセス管理ツールを使う必要があります</li>
+</ul>
+
+
+<pre><code>$ gem install fluentd
+$ fluentd --setup ./fluent
+$ fluentd -c ./fluent/fluent.conf -vv &amp;
+$ echo '{"json":"message"}' | fluent-cat debug.test
+</code></pre>
+
+<h4>RPMパッケージからFluentdをインストールする場合</h4>
+
+<ul>
+<li>td-agentは、fluentdを稼働させるために必要なRubyインタープリターを含んだ安定版パッケージ</li>
+</ul>
+
+
+<h5>Install td-agent</h5>
+
+<p><a href="http://docs.fluentd.org/articles/install-by-rpm">Installing Fluentd Using rpm Package | Fluentd</a></p>
+
+<p><a href="http://docs.treasuredata.com/articles/td-agent#install-td-agent">Overview of Streaming Import by Treasure Agent (td-agent) | Treasure Data</a></p>
+
+<h3>Pluginのインストール</h3>
+
+<pre><code>$ sudo /usr/lib64/fluent/ruby/bin/fluent-gem install fluent-plugin-parser
+$ sudo /usr/lib64/fluent/ruby/bin/fluent-gem install fluent-plugin-s3
+</code></pre>
+
+<h3>Configure</h3>
+
+<pre><code>sudo vi /etc/td-agent/td-agent.conf
+</code></pre>
+
+<h4>インプットプラグインに関する設定</h4>
+
+<pre><code>&lt;source&gt;
+  type forward
+  port 24224
+&lt;/source&gt;
+</code></pre>
+
+<h4>アウトプットプラグインに関する設定</h4>
+
+<ul>
+<li>s3にログをアウトプットする設定を記述</li>
+<li><code>buffer_path</code>で、一時的にログをバッファしておく場所を指定</li>
+<li><code>flush_interval</code>を設定することで、バッファされていたログをS3に吐き出す間隔を設定可能
+
+<ul>
+<li><code>time_slice_wait</code>で設定しても良いのかもしれません</li>
+</ul>
+</li>
+</ul>
+
+
+<pre><code>&lt;match foo&gt;
+  type parser
+  key_name messages
+  format json
+  tag rails
+&lt;/match&gt;
+&lt;match rails&gt;
+  type s3
+
+  aws_key_id AWS_KEY_ID
+  aws_sec_key AWS_SEC_ID
+  s3_bucket foo-log
+  s3_endpoint s3.amazonaws.com
+  s3_object_key_format %{path}%{time_slice}_%{index}_%{hostname}.%{file_extension}
+  path logs/
+  buffer_path /var/log/td-agent/buffer/s3
+
+  flush_interval 60s
+  time_slice_format %Y%m%d/%Y%m%d-%H
+&lt;/match&gt;
+</code></pre>
+
+<p><a href="https://github.com/fluent/fluent-plugin-s3">fluent/fluent-plugin-s3</a></p>
+
+<p><a href="http://www.idcf.jp/blog/storage/log_fluentd/">30分でできる！オブジェクトストレージへのログ保存（fluentd編） | IDC Frontier Engineers&#8217; Blog</a></p>
+
+<p><a href="http://developer.smartnews.be/blog/2013/09/02/an-effective-log-management-technique-which-uses-fluentd-and-s3/">S3とFluentdを用いた効率的なログ管理 | SmartNews開発者ブログ</a></p>
+
+<h3>Fluentdの起動・停止方法</h3>
+
+<pre><code>$ /etc/init.d/td-agent start
+$ /etc/init.d/td-agent stop
+$ /etc/init.d/td-agent restart
+$ /etc/init.d/td-agent status
+</code></pre>
+
+<h2>with Rails</h2>
+
+<ul>
+<li><code>Gemfile</code>に以下のGemを追加</li>
+</ul>
+
+
+<pre><code>gem 'act-fluent-logger-rails'
+gem 'lograge'
+</code></pre>
+
+<ul>
+<li><code>application.rb</code>に以下を追加</li>
+</ul>
+
+
+<pre><code>    config.log_level = :info
+    config.logger = ActFluentLoggerRails::Logger.new
+    config.lograge.enabled = true
+    config.lograge.formatter = Lograge::Formatters::Json.new
+</code></pre>
+
+<ul>
+<li><code>config/fluent-logger.yml</code>を編集</li>
+</ul>
+
+
+<pre><code>development:
+  fluent_host:   '127.0.0.1'
+  fluent_port:   24224
+  tag:           'foo'
+  messages_type: 'string'
+
+test:
+  fluent_host:   '127.0.0.1'
+  fluent_port:   24224
+  tag:           'foo'
+  messages_type: 'string'
+
+production:
+  fluent_host:   'xxx.yyy.zzz.xxx'
+  fluent_port:   24224
+  tag:           'foo'
+  messages_type: 'string'
+</code></pre>
+
+<ul>
+<li>環境変数に<code>FLUENTD_URL</code>を設定することでも対応可能
+
+<ul>
+<li>今回は、複数台のサーバーで運用するため、こちらを採用し、サーバー毎にhost変数を設定した</li>
+</ul>
+</li>
+</ul>
+
+
+<pre><code>export FLUENTD_URL='http://xxx.yyy.zzz.xxx:24224/foo?messages_type=string'
+</code></pre>
+
+<p><a href="http://www.fluentd.org/datasources/rails">Collecting and Analyzing Ruby on Rails Logs | Fluentd</a></p>
+
+<p><a href="http://shmztkyk.hatenablog.com/entry/2013/11/14/162601">fluentd+rails+mongoでサクッとログ環境を整備してみる - dev.log</a></p>
+
+<p><a href="http://docs.treasuredata.com/articles/rails">Streaming Import from Rails Apps | Treasure Data</a></p>
+
+<h2>Refs.</h2>
+
+<p><a href="https://github.com/fluent/fluentd">fluent/fluentd</a></p>
+
+<p><a href="https://github.com/actindi/act-fluent-logger-rails">actindi/act-fluent-logger-rails</a></p>
+
+<p><a href="https://github.com/fluent/fluent-logger-ruby">fluent/fluent-logger-ruby</a></p>
+
+<p><a href="http://www.atmarkit.co.jp/ait/articles/1402/06/news007.html">今さら聞けないfluentd～クラウド時代のログ管理入門（1）：増えるログ、多様化するログをどう効率的に運用するか (&frac12;) - ＠IT</a></p>
+
+<p><a href="http://www.atmarkit.co.jp/ait/articles/1403/05/news012.html">今さら聞けないfluentd～クラウド時代のログ管理入門（2）：fluentdと定番プラグインのインストール (&frac12;) - ＠IT</a></p>
+
+<p><a href="http://www.atmarkit.co.jp/ait/articles/1404/04/news004.html">今さら聞けないfluentd～クラウド時代のログ管理入門（3）：fluentdの効果的な活用例と安定運用のポイント (1/3) - ＠IT</a></p>
+
+<p><a href="http://knowledge.sakura.ad.jp/tech/1336/">柔軟なログ収集を可能にする「fluentd」入門 - さくらのナレッジ</a></p>
+
+<p><a href="http://knowledge.sakura.ad.jp/tech/1336/2/">柔軟なログ収集を可能にする「fluentd」入門 - さくらのナレッジ - Part 2</a></p>
+
+<p><a href="http://knowledge.sakura.ad.jp/tech/1336/3/">柔軟なログ収集を可能にする「fluentd」入門 - さくらのナレッジ - Part 3</a></p>
+
+<p><a href="http://qiita.com/kenzan100/items/9891a24263de77af6f31">導入手順 - Fluentdにおけるログ運用 - Qiita</a></p>
+
+<p><a href="http://hivecolor.com/id/37">fluentdの簡単な使い方、設定方法一覧 - Hive Color</a></p>
+]]></content>
+  </entry>
+  
+</feed>
